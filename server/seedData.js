@@ -673,6 +673,90 @@ async function run() {
       }
     }
 
+    // ── Step 9: Stage 3 approval-workflow test bills ─────────────
+    console.log('\n─── Stage 3: Approval Workflow Test Bills ───────');
+
+    const todayStr   = yyyymmdd(today);
+    const due30      = new Date(today); due30.setDate(today.getDate() + 30);
+    const due45      = new Date(today); due45.setDate(today.getDate() + 45);
+
+    const TEST_BILL_DEFS = [
+      {
+        billNumber: 'BIL-009',
+        supplier:   'Alcom Group',
+        billDate:   todayStr,
+        dueDate:    yyyymmdd(due30),
+        subtotal:   4587.00,
+        gstAmount:   413.00,
+        total:      5000.00,
+        amountPaid:    0.00,
+        status:     'RECEIVED',
+        notes:      'Test bill — Tier 1 approval only (< $10,000)',
+        items: [
+          { description: 'Copper Wire 1.5mm² 100m (roll)',       quantity: 100, unitPrice: 30.00,  amount: 3000.00 },
+          { description: 'Solder Paste Sn63/Pb37 (500g jar)',    quantity:  50, unitPrice: 25.00,  amount: 1250.00 },
+          { description: 'Packaging Tape 48mm x 66m (roll)',     quantity: 200, unitPrice:  5.00,  amount: 1000.00 },
+        ],
+      },
+      {
+        billNumber: 'BIL-010',
+        supplier:   'MechParts Pte Ltd',
+        billDate:   todayStr,
+        dueDate:    yyyymmdd(due45),
+        subtotal:   18349.00,
+        gstAmount:   1651.00,
+        total:      20000.00,
+        amountPaid:     0.00,
+        status:     'RECEIVED',
+        notes:      'Test bill — Tier 2 approval required (>= $10,000)',
+        items: [
+          { description: 'Servo Motor 200W DC 24V (with encoder)', quantity:  10, unitPrice: 1200.00, amount: 12000.00 },
+          { description: 'Precision Bearing 6205-2RS 25x52x15mm',  quantity:  50, unitPrice:  120.00, amount:  6000.00 },
+          { description: 'PCB Substrate FR4 2-Layer 100x80mm',     quantity: 100, unitPrice:   28.49, amount:  2849.00 },
+        ],
+      },
+    ];
+
+    let testCreated = 0;
+    let testSkipped = 0;
+    for (const def of TEST_BILL_DEFS) {
+      const exists = await Bill.findOne({ where: { billNumber: def.billNumber } });
+      if (exists) {
+        console.log(`  skipped  ${def.billNumber}  (already exists)`);
+        testSkipped++;
+        continue;
+      }
+      const supplierId = supIdMap[def.supplier];
+      if (!supplierId) {
+        console.error(`  ERROR: Supplier "${def.supplier}" not found — skipping ${def.billNumber}`);
+        continue;
+      }
+      const bill = await Bill.create({
+        billNumber:    def.billNumber,
+        supplierId,
+        billDate:      def.billDate,
+        dueDate:       def.dueDate,
+        subtotal:      def.subtotal,
+        gstAmount:     def.gstAmount,
+        total:         def.total,
+        amountPaid:    def.amountPaid,
+        status:        def.status,
+        approvalStage: 'NONE',
+        notes:         def.notes,
+      });
+      for (const item of def.items) {
+        await BillItem.create({ billId: bill.id, ...item });
+      }
+      console.log(
+        `  CREATED  ${def.billNumber}  ${def.status}  S$${def.total.toFixed(2).padStart(9)}` +
+        `  due ${def.dueDate}  (${def.items.length} items)`
+      );
+      testCreated++;
+    }
+    if (testCreated === 0 && testSkipped === TEST_BILL_DEFS.length) {
+      console.log('  All test bills already present — nothing to insert.');
+    }
+
     // ── Summary ───────────────────────────────────────────────────
     const billCount    = await Bill.count();
     const paymentCount = await Payment.count();
@@ -690,7 +774,7 @@ async function run() {
 
     console.log('\n═══════════════════════════════════════════════');
     console.log('  Seed complete!');
-    console.log(`  Bills in DB       : ${billCount}  (${BILL_DEFS.length} seed bills)`);
+    console.log(`  Bills in DB       : ${billCount}  (${BILL_DEFS.length} base + ${testCreated} test)`);
     console.log(`  Bill items        : ${itemCount}`);
     console.log(`  Payments          : ${paymentCount}`);
     console.log(`  Purchase Orders   : ${poCount}`);
