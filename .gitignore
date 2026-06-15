@@ -1,0 +1,7 @@
+node_modules/
+.env
+*.log
+*.txt
+mcp_*.log
+curl
+server/config/config.json

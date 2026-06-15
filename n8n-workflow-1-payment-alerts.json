@@ -1,0 +1,162 @@
+{
+  "name": "AP Payment Alerts",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "11111111-1111-1111-1111-111111111101",
+      "name": "Daily 8AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://endurance-blouse-likewise.ngrok-free.dev/api/reminders/upcoming",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MSwidXNlcm5hbWUiOiJhZG1pbiIsInJvbGUiOiJBRE1JTiIsImlhdCI6MTc4MTQ0ODY4MywiZXhwIjoxODEyOTg0NjgzfQ.SOwF4CFUO197pEKBT2zo1_o9vQwZPOwEEA6RCVmK1p0"
+            },
+            {
+              "name": "ngrok-skip-browser-warning",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "11111111-1111-1111-1111-111111111102",
+      "name": "Fetch Upcoming Bills",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst bills = items.map(i => i.json);\nconst count = bills.length;\nif (count === 0) return [{ json: { count: 0, subject: '', htmlBody: '' } }];\nconst urgentCount = bills.filter(b => b.urgency === 'URGENT').length;\nconst totalAmount = bills.reduce((s, b) => s + parseFloat(b.amountDue || 0), 0);\nconst rows = bills.map(b => {\n  const bg = b.urgency === 'URGENT' ? '#fff5f5' : 'white';\n  const uc = b.urgency === 'URGENT' ? '#dc2626' : b.urgency === 'SOON' ? '#d97706' : '#16a34a';\n  const days = b.daysLeft <= 0 ? (Math.abs(b.daysLeft) + 'd overdue') : (b.daysLeft + 'd left');\n  const sup = (b.supplier && b.supplier.companyName) ? b.supplier.companyName : '-';\n  return `<tr style='background:${bg}'><td style='padding:8px;border-bottom:1px solid #eee'>${b.billNumber}</td><td style='padding:8px;border-bottom:1px solid #eee'>${sup}</td><td style='padding:8px;border-bottom:1px solid #eee'>$${parseFloat(b.amountDue).toFixed(2)}</td><td style='padding:8px;border-bottom:1px solid #eee'>${b.dueDate}</td><td style='padding:8px;border-bottom:1px solid #eee'>${days}</td><td style='padding:8px;border-bottom:1px solid #eee;color:${uc}'>${b.urgency}</td></tr>`;\n}).join('');\nconst urgentNote = urgentCount > 0 ? ` (${urgentCount} URGENT)` : '';\nconst htmlBody = `<h2 style='color:#1e3a5f'>AP Payment Reminders</h2><p>You have <strong>${count}</strong> payment(s) due this week — total <strong>$${totalAmount.toFixed(2)}</strong>${urgentNote}.</p><table style='border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:13px'><thead><tr style='background:#1e3a5f;color:white'><th style='padding:8px;text-align:left'>Bill #</th><th style='padding:8px;text-align:left'>Supplier</th><th style='padding:8px;text-align:left'>Amount</th><th style='padding:8px;text-align:left'>Due Date</th><th style='padding:8px;text-align:left'>Days Left</th><th style='padding:8px;text-align:left'>Urgency</th></tr></thead><tbody>${rows}</tbody></table><p style='color:#666;font-size:12px;margin-top:16px'>TSH Accounts Payable System — Auto-generated</p>`;\nconst subject = `[TSH AP] ${count} Payment${count > 1 ? 's' : ''} Due This Week${urgentCount > 0 ? ` — ${urgentCount} URGENT` : ''}`;\nreturn [{ json: { count, subject, htmlBody } }];"
+      },
+      "id": "11111111-1111-1111-1111-111111111103",
+      "name": "Format Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "wf1-cond-1",
+              "leftValue": "={{ $json.count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "11111111-1111-1111-1111-111111111104",
+      "name": "Has Bills?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "ap@tsh.com",
+        "toEmail": "ap@tsh.com",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "html": "={{ $json.htmlBody }}",
+        "options": {}
+      },
+      "id": "11111111-1111-1111-1111-111111111105",
+      "name": "Send Alert Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1200, 200],
+      "credentials": {
+        "smtp": {
+          "id": "1",
+          "name": "SMTP"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 8AM": {
+      "main": [
+        [
+          {
+            "node": "Fetch Upcoming Bills",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Upcoming Bills": {
+      "main": [
+        [
+          {
+            "node": "Format Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Email": {
+      "main": [
+        [
+          {
+            "node": "Has Bills?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Bills?": {
+      "main": [
+        [
+          {
+            "node": "Send Alert Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Singapore"
+  },
+  "versionId": "00000000-0000-0000-0000-000000000001",
+  "meta": {
+    "instanceId": "tsh-ap"
+  }
+}
