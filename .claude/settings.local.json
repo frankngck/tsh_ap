@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\tsh_AP\\\\server\" -Recurse -Filter \"*.js\")",
+      "Bash(Select-Object FullName)"
+    ]
+  },
+  "disabledMcpjsonServers": [
+    "tsh-ap"
+  ]
+}
