@@ -6,6 +6,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import SupplierList from './pages/SupplierList';
 import SupplierForm from './pages/SupplierForm';
+import SupplierDetail from './pages/SupplierDetail';
 import BillList from './pages/BillList';
 import BillForm from './pages/BillForm';
 import BillDetail from './pages/BillDetail';
@@ -61,6 +62,8 @@ function AppShell() {
             element={<RoleRoute roles={['admin','clerk']}><SupplierForm /></RoleRoute>} />
           <Route path="/suppliers/:id/edit"
             element={<RoleRoute roles={['admin','clerk']}><SupplierForm /></RoleRoute>} />
+          <Route path="/suppliers/:id"
+            element={<ProtectedRoute><SupplierDetail /></ProtectedRoute>} />
 
           <Route path="/bills"
             element={<ProtectedRoute><BillList /></ProtectedRoute>} />

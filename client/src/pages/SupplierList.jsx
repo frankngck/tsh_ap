@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
 
@@ -147,9 +147,9 @@ function Pagination({ total, page, pageSize, onChange }) {
 
 // ─── Main component ───────────────────────────────────────────────
 export default function SupplierList() {
-  const navigate = useNavigate();
   const { hasRole } = useAuth();
-  const canEdit = hasRole('admin', 'clerk');
+  const canEdit      = hasRole('admin', 'clerk');
+  const canScorecard = hasRole('admin', 'manager');
   const [suppliers, setSuppliers]     = useState([]);
   const [loading, setLoading]         = useState(true);
   const [activeTab, setActiveTab]     = useState('');
@@ -275,10 +275,12 @@ export default function SupplierList() {
               {paginated.map((s) => (
                 <tr key={s.id}>
                   <td>
-                    <div style={{ fontWeight: 600, color: 'var(--gray-800)' }}>{s.companyName}</div>
-                    <div style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 2 }}>
-                      {s.supplierCode}
-                    </div>
+                    <Link
+                      to={`/suppliers/${s.id}`}
+                      style={{ fontWeight: 600, color: 'var(--teal)', textDecoration: 'none' }}
+                    >
+                      {s.companyName}
+                    </Link>
                   </td>
                   <td>{s.contactPerson || <span style={{ color: 'var(--gray-300)' }}>—</span>}</td>
                   <td>
@@ -318,8 +320,13 @@ export default function SupplierList() {
                   </td>
                   <td>
                     <div className="table-actions">
+                      {canScorecard && (
+                        <Link to={`/suppliers/${s.id}`} className="btn btn-sm btn-outline">
+                          View
+                        </Link>
+                      )}
                       {canEdit && (
-                        <Link to={`/suppliers/${s.id}/edit`} className="btn btn-sm btn-outline">
+                        <Link to={`/suppliers/${s.id}/edit`} className="btn btn-sm btn-secondary">
                           Edit
                         </Link>
                       )}
