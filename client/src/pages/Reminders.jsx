@@ -189,8 +189,8 @@ export default function Reminders() {
 
   const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
   const mtdCount = history
-    .filter((h) => String(h.date).slice(0, 7) === currentMonth)
-    .reduce((s, h) => s + Number(h.billCount), 0);
+    .filter((h) => String(h.sentAt).slice(0, 7) === currentMonth)
+    .reduce((s, h) => s + Number(h.recordCount), 0);
 
   return (
     <div>
@@ -378,8 +378,8 @@ export default function Reminders() {
             ) : (
               history.map((h, i) => (
                 <tr key={i}>
-                  <td style={{ fontWeight: 600, fontSize: 13 }}>{fmtDate(h.date)}</td>
-                  <td style={{ textAlign: 'center', fontSize: 13 }}>{h.billCount}</td>
+                  <td style={{ fontWeight: 600, fontSize: 13 }}>{fmtDate(h.sentAt)}</td>
+                  <td style={{ textAlign: 'center', fontSize: 13 }}>{h.recordCount}</td>
                   <td style={{ textAlign: 'right', fontSize: 13, fontWeight: 600 }}>{fmt(h.totalAmount)}</td>
                   <td style={{ textAlign: 'center' }}>
                     <span style={{
