@@ -69,7 +69,7 @@ exports.query = async (req, res) => {
     const tools = mcpTools.map((t) => ({
       name:         t.name,
       description:  t.description,
-      input_schema: t.input_schema,
+      input_schema: t.parameters,
     }));
 
     const messages = [{ role: 'user', content: query.trim() }];
