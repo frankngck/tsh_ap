@@ -135,21 +135,61 @@ exports.update = async (req, res) => {
   }
 };
 
-exports.approve = async (req, res) => {
+exports.approveBill = async (req, res) => {
   try {
+    if (!['admin', 'clerk'].includes(req.user.role))
+      return res.status(403).json({ error: 'Only clerk or admin can do Tier 1 approval' });
+
     const bill = await Bill.findByPk(req.params.id);
     if (!bill) return res.status(404).json({ message: 'Bill not found' });
-    if (bill.status !== 'RECEIVED') {
-      return res.status(400).json({ message: `Cannot approve a bill with status ${bill.status}` });
+    if (bill.status !== 'RECEIVED')
+      return res.status(400).json({ error: 'Bill must be RECEIVED status' });
+
+    if (parseFloat(bill.total) < 10000) {
+      await bill.update({
+        status:            'APPROVED',
+        approvalStage:     'NONE',
+        approvedByClerkId: req.user.id,
+        approvedAt:        new Date(),
+      });
+      return res.json({ message: 'Bill approved', tier: 1, status: 'APPROVED' });
+    } else {
+      await bill.update({
+        approvalStage:     'PENDING_MANAGER',
+        approvedByClerkId: req.user.id,
+        approvedAt:        new Date(),
+      });
+      return res.json({
+        message: 'Sent for manager approval',
+        tier: 1,
+        requiresManagerApproval: true,
+        approvalStage: 'PENDING_MANAGER',
+      });
     }
-    await bill.update({
-      status:            'APPROVED',
-      approvedByClerkId: req.user.id,
-      approvedAt:        new Date(),
-    });
-    res.json({ message: 'Bill approved', bill });
   } catch (err) {
     res.status(500).json({ message: 'Error approving bill', error: err.message });
+  }
+};
+
+exports.managerApproveBill = async (req, res) => {
+  try {
+    if (!['admin', 'manager'].includes(req.user.role))
+      return res.status(403).json({ error: 'Only manager or admin can do Tier 2 approval' });
+
+    const bill = await Bill.findByPk(req.params.id);
+    if (!bill) return res.status(404).json({ message: 'Bill not found' });
+    if (bill.approvalStage !== 'PENDING_MANAGER')
+      return res.status(400).json({ error: 'Bill is not pending manager approval' });
+
+    await bill.update({
+      status:              'APPROVED',
+      approvalStage:       'APPROVED_MANAGER',
+      approvedByManagerId: req.user.id,
+      managerApprovedAt:   new Date(),
+    });
+    return res.json({ message: 'Bill final approved by manager', tier: 2 });
+  } catch (err) {
+    res.status(500).json({ message: 'Error on manager approval', error: err.message });
   }
 };
 

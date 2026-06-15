@@ -71,6 +71,40 @@ function TableSkeleton() {
   );
 }
 
+// ─── Manager approve modal ────────────────────────────────────────
+function ManagerApproveModal({ bill, onConfirm, onCancel, loading }) {
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3 className="modal-title">Final Approval — Manager</h3>
+        </div>
+        <div className="modal-body">
+          <p>
+            Final-approve <strong>{bill.billNumber}</strong> from{' '}
+            <strong>{bill.supplier?.companyName}</strong>?
+          </p>
+          <p className="modal-warning">
+            Total: {`S$${Number(bill.total || 0).toLocaleString('en-SG', { minimumFractionDigits: 2 })}`}
+            {' '}· This is a high-value bill requiring manager sign-off.
+          </p>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onCancel} disabled={loading}>Cancel</button>
+          <button
+            className="btn btn-primary"
+            style={{ background: '#B45309', borderColor: '#B45309' }}
+            onClick={onConfirm}
+            disabled={loading}
+          >
+            {loading ? <><span className="spinner" />Approving…</> : '✓ Final Approve'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Approve confirmation modal ───────────────────────────────────
 function ApproveModal({ bill, onConfirm, onCancel, loading }) {
   return (
@@ -155,9 +189,11 @@ export default function BillList() {
   const [loading,       setLoading]       = useState(true);
   const [activeTab,     setActiveTab]     = useState('');
   const [page,          setPage]          = useState(1);
-  const [approveTarget, setApproveTarget] = useState(null);
-  const [approving,     setApproving]     = useState(false);
-  const [error,         setError]         = useState('');
+  const [approveTarget,        setApproveTarget]        = useState(null);
+  const [approving,            setApproving]            = useState(false);
+  const [managerApproveTarget, setManagerApproveTarget] = useState(null);
+  const [managerApproving,     setManagerApproving]     = useState(false);
+  const [error,                setError]                = useState('');
 
   // ── Fetch ──────────────────────────────────────────────────────
   const load = (status = activeTab, pg = page) => {
@@ -189,19 +225,38 @@ export default function BillList() {
     load(activeTab, p);
   };
 
-  // ── Approve flow ───────────────────────────────────────────────
+  // ── Tier-1 approve flow ────────────────────────────────────────
   const handleApproveConfirm = async () => {
     if (!approveTarget) return;
     setApproving(true);
     try {
-      await api.patch(`/bills/${approveTarget.id}/approve`);
+      const res = await api.patch(`/bills/${approveTarget.id}/approve`);
       setApproveTarget(null);
+      if (res.data.requiresManagerApproval) {
+        setError('');
+      }
       load();
     } catch (err) {
-      setError(err.response?.data?.message || 'Approve failed. Please try again.');
+      setError(err.response?.data?.error || err.response?.data?.message || 'Approve failed. Please try again.');
       setApproveTarget(null);
     } finally {
       setApproving(false);
+    }
+  };
+
+  // ── Tier-2 manager approve flow ────────────────────────────────
+  const handleManagerApproveConfirm = async () => {
+    if (!managerApproveTarget) return;
+    setManagerApproving(true);
+    try {
+      await api.patch(`/bills/${managerApproveTarget.id}/manager-approve`);
+      setManagerApproveTarget(null);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || err.response?.data?.message || 'Manager approval failed.');
+      setManagerApproveTarget(null);
+    } finally {
+      setManagerApproving(false);
     }
   };
 
@@ -350,7 +405,20 @@ export default function BillList() {
                   </td>
 
                   {/* Status */}
-                  <td><StatusBadge status={b.status} /></td>
+                  <td>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <StatusBadge status={b.status} />
+                      {b.approvalStage === 'PENDING_MANAGER' && (
+                        <span style={{
+                          fontSize: 10, fontWeight: 700, letterSpacing: '0.3px',
+                          color: '#92400E', background: '#FEF3C7',
+                          padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap',
+                        }}>
+                          Awaiting Manager
+                        </span>
+                      )}
+                    </div>
+                  </td>
 
                   {/* Actions */}
                   <td>
@@ -358,7 +426,7 @@ export default function BillList() {
                       <Link to={`/bills/${b.id}`} className="btn btn-sm btn-outline">
                         View
                       </Link>
-                      {b.purchaseOrderId && (hasRole('admin', 'manager')) && (
+                      {b.purchaseOrderId && hasRole('admin', 'manager') && (
                         <Link
                           to={`/three-way-match?billId=${b.id}`}
                           className="btn btn-sm btn-secondary"
@@ -366,8 +434,8 @@ export default function BillList() {
                           Match
                         </Link>
                       )}
-                      {/* Clerk + Admin: Tier-1 approve for RECEIVED bills */}
-                      {b.status === 'RECEIVED' && hasRole('admin', 'clerk') && (
+                      {/* Clerk + Admin: Tier-1 approve — only when not yet escalated */}
+                      {b.status === 'RECEIVED' && b.approvalStage === 'NONE' && hasRole('admin', 'clerk') && (
                         <button
                           className="btn btn-sm btn-primary"
                           onClick={() => setApproveTarget(b)}
@@ -375,13 +443,20 @@ export default function BillList() {
                           Approve
                         </button>
                       )}
-                      {/* Manager + Admin: Final approve for PENDING_MANAGER bills */}
+                      {/* Clerk view when bill is pending manager */}
+                      {b.status === 'RECEIVED' && b.approvalStage === 'PENDING_MANAGER' && hasRole('clerk') && !hasRole('admin') && (
+                        <span style={{ fontSize: 11, color: '#92400E', fontStyle: 'italic' }}>
+                          Pending Manager
+                        </span>
+                      )}
+                      {/* Manager + Admin: Tier-2 final approve */}
                       {b.approvalStage === 'PENDING_MANAGER' && hasRole('admin', 'manager') && (
                         <button
                           className="btn btn-sm btn-primary"
-                          onClick={() => setApproveTarget(b)}
+                          style={{ background: '#B45309', borderColor: '#B45309' }}
+                          onClick={() => setManagerApproveTarget(b)}
                         >
-                          Final Approve
+                          ✓ Final Approve
                         </button>
                       )}
                       {b.status === 'APPROVED' && hasRole('admin', 'clerk') && (
@@ -416,13 +491,23 @@ export default function BillList() {
         Status workflow:&nbsp; RECEIVED → (3-Way Match) → APPROVED → PAID &nbsp;|&nbsp; DISPUTED if match fails
       </div>
 
-      {/* ── Approve Modal ── */}
+      {/* ── Tier-1 Approve Modal ── */}
       {approveTarget && (
         <ApproveModal
           bill={approveTarget}
           onConfirm={handleApproveConfirm}
           onCancel={() => setApproveTarget(null)}
           loading={approving}
+        />
+      )}
+
+      {/* ── Tier-2 Manager Approve Modal ── */}
+      {managerApproveTarget && (
+        <ManagerApproveModal
+          bill={managerApproveTarget}
+          onConfirm={handleManagerApproveConfirm}
+          onCancel={() => setManagerApproveTarget(null)}
+          loading={managerApproving}
         />
       )}
     </div>

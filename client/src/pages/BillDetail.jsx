@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import api from '../api/axios';
+import { useAuth } from '../context/AuthContext';
 
 // ─── Helpers ──────────────────────────────────────────────────────
 const fmt = (n) =>
@@ -15,7 +16,7 @@ const fmtDate = (s) => {
 };
 
 const fmtDateTime = (s) => {
-  if (!s) return '—';
+  if (!s) return null;
   return new Date(s).toLocaleString('en-SG', {
     day: '2-digit', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
@@ -23,11 +24,12 @@ const fmtDateTime = (s) => {
 };
 
 const METHOD_LABEL = {
-  BANK_TRANSFER: 'Bank Transfer',
-  CHEQUE:        'Cheque',
-  GIRO:          'GIRO',
-  CASH:          'Cash',
-  OTHER:         'Other',
+  BANK_TRANSFER:        'Bank Transfer',
+  CHEQUE:               'Cheque',
+  GIRO:                 'GIRO',
+  TELEGRAPHIC_TRANSFER: 'Telegraphic Transfer',
+  CASH:                 'Cash',
+  OTHER:                'Other',
 };
 
 // ─── Status badge ─────────────────────────────────────────────────
@@ -35,8 +37,9 @@ function StatusBadge({ status }) {
   return <span className={`badge badge-${status?.toLowerCase()}`}>{status}</span>;
 }
 
-// ─── Approve modal ────────────────────────────────────────────────
+// ─── Tier-1 approve modal ─────────────────────────────────────────
 function ApproveModal({ bill, onConfirm, onCancel, loading }) {
+  const isHighValue = parseFloat(bill.total) >= 10000;
   return (
     <div className="modal-overlay" onClick={onCancel}>
       <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
@@ -46,13 +49,46 @@ function ApproveModal({ bill, onConfirm, onCancel, loading }) {
         <div className="modal-body">
           <p>Approve <strong>{bill.billNumber}</strong>?</p>
           <p className="modal-warning">
-            Total: {fmt(bill.total)} · Once approved, this bill can receive payments.
+            Total: {fmt(bill.total)}
+            {isHighValue
+              ? ' · High-value bill — will be sent to manager for final approval.'
+              : ' · Once approved, this bill can receive payments.'}
           </p>
         </div>
         <div className="modal-footer">
           <button className="btn btn-secondary" onClick={onCancel} disabled={loading}>Cancel</button>
           <button className="btn btn-primary" onClick={onConfirm} disabled={loading}>
             {loading ? <><span className="spinner" />Approving…</> : 'Approve Bill'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Tier-2 manager final approve modal ───────────────────────────
+function ManagerApproveModal({ bill, onConfirm, onCancel, loading }) {
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3 className="modal-title">Final Approval — Manager</h3>
+        </div>
+        <div className="modal-body">
+          <p>Final-approve <strong>{bill.billNumber}</strong>?</p>
+          <p className="modal-warning">
+            Total: {fmt(bill.total)} · High-value bill requiring manager sign-off.
+          </p>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onCancel} disabled={loading}>Cancel</button>
+          <button
+            className="btn btn-primary"
+            style={{ background: '#B45309', borderColor: '#B45309' }}
+            onClick={onConfirm}
+            disabled={loading}
+          >
+            {loading ? <><span className="spinner" />Approving…</> : '✓ Final Approve'}
           </button>
         </div>
       </div>
@@ -117,8 +153,9 @@ function Sk({ w = '100%', h = 14, r = 4, mb = 0 }) {
 
 // ─── Main component ───────────────────────────────────────────────
 export default function BillDetail() {
-  const { id }    = useParams();
-  const navigate  = useNavigate();
+  const { id }          = useParams();
+  const navigate        = useNavigate();
+  const { hasRole }     = useAuth();
 
   const [bill,      setBill]      = useState(null);
   const [payments,  setPayments]  = useState([]);
@@ -127,9 +164,9 @@ export default function BillDetail() {
   const [actioning, setActioning] = useState(false);
   const [actionErr, setActionErr] = useState('');
 
-  // Modal state
-  const [showApprove, setShowApprove] = useState(false);
-  const [showDispute, setShowDispute] = useState(false);
+  const [showApprove,        setShowApprove]        = useState(false);
+  const [showManagerApprove, setShowManagerApprove] = useState(false);
+  const [showDispute,        setShowDispute]        = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -155,8 +192,22 @@ export default function BillDetail() {
       setShowApprove(false);
       load();
     } catch (e) {
-      setActionErr(e.response?.data?.message || 'Approve failed.');
+      setActionErr(e.response?.data?.error || e.response?.data?.message || 'Approve failed.');
       setShowApprove(false);
+    } finally {
+      setActioning(false);
+    }
+  };
+
+  const handleManagerApprove = async () => {
+    setActioning(true);
+    try {
+      await api.patch(`/bills/${id}/manager-approve`);
+      setShowManagerApprove(false);
+      load();
+    } catch (e) {
+      setActionErr(e.response?.data?.error || e.response?.data?.message || 'Manager approval failed.');
+      setShowManagerApprove(false);
     } finally {
       setActioning(false);
     }
@@ -207,7 +258,17 @@ export default function BillDetail() {
     );
   }
 
-  const outstanding = parseFloat(bill.total) - parseFloat(bill.amountPaid || 0);
+  const outstanding  = parseFloat(bill.total) - parseFloat(bill.amountPaid || 0);
+  const isHighValue  = parseFloat(bill.total) >= 10000;
+  const canTier1     = bill.status === 'RECEIVED' && bill.approvalStage === 'NONE' && hasRole('admin', 'clerk');
+  const canTier2     = bill.approvalStage === 'PENDING_MANAGER' && hasRole('admin', 'manager');
+  const canDispute   = bill.status === 'RECEIVED' && hasRole('admin', 'clerk');
+  const canPay       = bill.status === 'APPROVED' && hasRole('admin', 'clerk');
+
+  // Approval status display
+  const tier1Done    = !!bill.approvedAt;
+  const tier2Done    = !!bill.managerApprovedAt;
+  const tier2Pending = bill.approvalStage === 'PENDING_MANAGER';
 
   return (
     <div>
@@ -217,6 +278,14 @@ export default function BillDetail() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
             <h1 className="page-title" style={{ margin: 0 }}>{bill.billNumber}</h1>
             <StatusBadge status={bill.status} />
+            {tier2Pending && (
+              <span style={{
+                fontSize: 11, fontWeight: 700, color: '#92400E',
+                background: '#FEF3C7', padding: '3px 8px', borderRadius: 4,
+              }}>
+                Awaiting Manager Approval
+              </span>
+            )}
           </div>
           <div className="page-subtitle">
             {bill.supplier?.companyName}
@@ -238,13 +307,13 @@ export default function BillDetail() {
           <div className="card-body">
             <div className="detail-grid">
               <DetailRow label="Company">{bill.supplier?.companyName}</DetailRow>
-              <DetailRow label="Code">{bill.supplier?.supplierCode}</DetailRow>
               <DetailRow label="Contact">{bill.supplier?.contactPerson}</DetailRow>
               <DetailRow label="Email">
                 {bill.supplier?.email
                   ? <a href={`mailto:${bill.supplier.email}`} style={{ color: 'var(--teal)' }}>{bill.supplier.email}</a>
                   : null}
               </DetailRow>
+              <DetailRow label="Phone">{bill.supplier?.phone}</DetailRow>
             </div>
           </div>
         </div>
@@ -262,15 +331,6 @@ export default function BillDetail() {
               <DetailRow label="Payment Terms">
                 {bill.supplier?.paymentTerms ? `${bill.supplier.paymentTerms} days` : '—'}
               </DetailRow>
-              {bill.approvedAt && (
-                <DetailRow label="Approved At">{fmtDateTime(bill.approvedAt)}</DetailRow>
-              )}
-              {bill.disputeReason && (
-                <div className="detail-row" style={{ gridColumn: '1 / -1' }}>
-                  <div className="detail-label">Dispute Reason</div>
-                  <div className="detail-value" style={{ color: 'var(--red)' }}>{bill.disputeReason}</div>
-                </div>
-              )}
               {bill.notes && (
                 <div className="detail-row" style={{ gridColumn: '1 / -1' }}>
                   <div className="detail-label">Notes</div>
@@ -278,6 +338,33 @@ export default function BillDetail() {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Approval Status ── */}
+      <div className="card section-gap">
+        <div className="card-header"><span className="card-title">Approval Status</span></div>
+        <div className="card-body">
+          <div className="detail-grid">
+            <DetailRow label="Tier 1 (Clerk)">
+              {tier1Done
+                ? <span style={{ color: 'var(--green)', fontWeight: 600 }}>
+                    ✓ Approved · {fmtDateTime(bill.approvedAt)}
+                  </span>
+                : <span style={{ color: 'var(--gray-400)' }}>Pending</span>}
+            </DetailRow>
+            <DetailRow label="Tier 2 (Manager)">
+              {tier2Done
+                ? <span style={{ color: 'var(--green)', fontWeight: 600 }}>
+                    ✓ Approved · {fmtDateTime(bill.managerApprovedAt)}
+                  </span>
+                : tier2Pending
+                  ? <span style={{ color: '#B45309', fontWeight: 600 }}>Awaiting manager approval</span>
+                  : !isHighValue && tier1Done
+                    ? <span style={{ color: 'var(--gray-400)' }}>Not required (bill &lt; S$10,000)</span>
+                    : <span style={{ color: 'var(--gray-400)' }}>Pending</span>}
+            </DetailRow>
           </div>
         </div>
       </div>
@@ -363,7 +450,7 @@ export default function BillDetail() {
         <div className="card section-gap">
           <div className="card-header">
             <span className="card-title">Payment History</span>
-            {bill.status === 'APPROVED' && (
+            {canPay && (
               <button
                 className="btn btn-sm btn-primary"
                 onClick={() => navigate(`/payments/new?billId=${id}`)}
@@ -388,8 +475,8 @@ export default function BillDetail() {
                   <tr key={p.id}>
                     <td style={{ fontSize: 13 }}>{fmtDate(p.paymentDate)}</td>
                     <td style={{ fontWeight: 600, color: 'var(--green)' }}>{fmt(p.amount)}</td>
-                    <td style={{ fontSize: 13 }}>{METHOD_LABEL[p.paymentMethod] || p.paymentMethod}</td>
-                    <td style={{ fontSize: 13 }}>{p.reference || '—'}</td>
+                    <td style={{ fontSize: 13 }}>{METHOD_LABEL[p.method] || p.method}</td>
+                    <td style={{ fontSize: 13 }}>{p.referenceNumber || '—'}</td>
                     <td style={{ fontSize: 13, color: 'var(--gray-500)' }}>{p.notes || '—'}</td>
                   </tr>
                 ))}
@@ -403,27 +490,30 @@ export default function BillDetail() {
       <div className="form-actions" style={{ marginTop: 32 }}>
         <Link to="/bills" className="btn btn-secondary">← Back</Link>
 
-        {bill.status === 'RECEIVED' && (
-          <button
-            className="btn btn-danger"
-            onClick={() => setShowDispute(true)}
-            disabled={actioning}
-          >
+        {canDispute && (
+          <button className="btn btn-danger" onClick={() => setShowDispute(true)} disabled={actioning}>
             Dispute
           </button>
         )}
 
-        {bill.status === 'RECEIVED' && (
-          <button
-            className="btn btn-primary"
-            onClick={() => setShowApprove(true)}
-            disabled={actioning}
-          >
-            Approve
+        {canTier1 && (
+          <button className="btn btn-primary" onClick={() => setShowApprove(true)} disabled={actioning}>
+            {isHighValue ? 'Approve → Send to Manager' : 'Approve'}
           </button>
         )}
 
-        {bill.status === 'APPROVED' && (
+        {canTier2 && (
+          <button
+            className="btn btn-primary"
+            style={{ background: '#B45309', borderColor: '#B45309' }}
+            onClick={() => setShowManagerApprove(true)}
+            disabled={actioning}
+          >
+            ✓ Final Approve — Manager
+          </button>
+        )}
+
+        {canPay && (
           <button
             className="btn btn-primary"
             onClick={() => navigate(`/payments/new?billId=${id}`)}
@@ -447,6 +537,14 @@ export default function BillDetail() {
           bill={bill}
           onConfirm={handleApprove}
           onCancel={() => setShowApprove(false)}
+          loading={actioning}
+        />
+      )}
+      {showManagerApprove && (
+        <ManagerApproveModal
+          bill={bill}
+          onConfirm={handleManagerApprove}
+          onCancel={() => setShowManagerApprove(false)}
           loading={actioning}
         />
       )}
