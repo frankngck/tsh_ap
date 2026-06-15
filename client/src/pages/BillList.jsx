@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import api from '../api/axios';
+import { useAuth } from '../context/AuthContext';
 
 // ─── Constants ────────────────────────────────────────────────────
 const PAGE_SIZE = 15;
@@ -147,6 +148,7 @@ function Pagination({ total, page, pageSize, onChange }) {
 // ─── Main component ───────────────────────────────────────────────
 export default function BillList() {
   const navigate = useNavigate();
+  const { hasRole } = useAuth();
 
   const [bills,         setBills]         = useState([]);
   const [total,         setTotal]         = useState(0);
@@ -217,7 +219,7 @@ export default function BillList() {
           <h1 className="page-title">Bill Management</h1>
           {!loading && <div className="page-subtitle">{subtitle}</div>}
         </div>
-        <Link to="/bills/new" className="btn btn-primary">+ Record Bill</Link>
+        {!hasRole('manager') && <Link to="/bills/new" className="btn btn-primary">+ Record Bill</Link>}
       </div>
 
       {error && <div className="alert alert-error" style={{ marginBottom: 16 }}>{error}</div>}
@@ -356,7 +358,7 @@ export default function BillList() {
                       <Link to={`/bills/${b.id}`} className="btn btn-sm btn-outline">
                         View
                       </Link>
-                      {b.purchaseOrderId && (
+                      {b.purchaseOrderId && (hasRole('admin', 'manager')) && (
                         <Link
                           to={`/three-way-match?billId=${b.id}`}
                           className="btn btn-sm btn-secondary"
@@ -364,7 +366,8 @@ export default function BillList() {
                           Match
                         </Link>
                       )}
-                      {b.status === 'RECEIVED' && (
+                      {/* Clerk + Admin: Tier-1 approve for RECEIVED bills */}
+                      {b.status === 'RECEIVED' && hasRole('admin', 'clerk') && (
                         <button
                           className="btn btn-sm btn-primary"
                           onClick={() => setApproveTarget(b)}
@@ -372,7 +375,16 @@ export default function BillList() {
                           Approve
                         </button>
                       )}
-                      {b.status === 'APPROVED' && (
+                      {/* Manager + Admin: Final approve for PENDING_MANAGER bills */}
+                      {b.approvalStage === 'PENDING_MANAGER' && hasRole('admin', 'manager') && (
+                        <button
+                          className="btn btn-sm btn-primary"
+                          onClick={() => setApproveTarget(b)}
+                        >
+                          Final Approve
+                        </button>
+                      )}
+                      {b.status === 'APPROVED' && hasRole('admin', 'clerk') && (
                         <button
                           className="btn btn-sm btn-primary"
                           onClick={() => navigate(`/payments/new?billId=${b.id}`)}

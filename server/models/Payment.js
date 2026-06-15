@@ -10,17 +10,16 @@ module.exports = (sequelize, DataTypes) => {
 
   Payment.init(
     {
-      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-      billId: { type: DataTypes.INTEGER, allowNull: false },
-      paymentDate: { type: DataTypes.DATEONLY, allowNull: false },
-      amount: { type: DataTypes.DECIMAL(12, 2), allowNull: false },
-      paymentMethod: {
-        type: DataTypes.ENUM('BANK_TRANSFER', 'CHEQUE', 'CASH', 'GIRO', 'OTHER'),
+      id:              { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      billId:          { type: DataTypes.INTEGER, allowNull: false },
+      paymentDate:     { type: DataTypes.DATEONLY, allowNull: false },
+      amount:          { type: DataTypes.DECIMAL(12, 2), allowNull: false },
+      method: {
+        type: DataTypes.ENUM('BANK_TRANSFER', 'CHEQUE', 'GIRO', 'TELEGRAPHIC_TRANSFER'),
         defaultValue: 'BANK_TRANSFER',
       },
-      reference: { type: DataTypes.STRING(200) },
-      notes: { type: DataTypes.TEXT },
-      recordedBy: { type: DataTypes.INTEGER },
+      referenceNumber: { type: DataTypes.STRING(50) },
+      notes:           { type: DataTypes.TEXT },
     },
     {
       sequelize,

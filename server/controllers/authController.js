@@ -3,23 +3,15 @@ const { User } = require('../models');
 
 exports.login = async (req, res) => {
   try {
-    const { email, username, password } = req.body;
-    const login = email || username;
+    const { email, password } = req.body;
 
-    if (!login || !password) {
-      return res.status(400).json({ message: 'Email/username and password are required' });
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Email and password are required' });
     }
 
-    const { Op } = require('sequelize');
-    const user = await User.findOne({
-      where: { [Op.or]: [{ email: login }, { username: login }] },
-    });
+    const user = await User.findOne({ where: { email } });
     if (!user) {
       return res.status(401).json({ message: 'Invalid credentials' });
-    }
-
-    if (user.status === 'INACTIVE') {
-      return res.status(403).json({ message: 'Account is inactive' });
     }
 
     const isValid = await user.validatePassword(password);
@@ -28,19 +20,18 @@ exports.login = async (req, res) => {
     }
 
     const token = jwt.sign(
-      { id: user.id, username: user.username, role: user.role },
+      { id: user.id, email: user.email, role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
+      { expiresIn: '24h' }
     );
 
     res.json({
       token,
       user: {
-        id: user.id,
-        username: user.username,
+        id:    user.id,
         email: user.email,
-        fullName: user.fullName,
-        role: user.role,
+        name:  user.name,
+        role:  user.role,
       },
     });
   } catch (err) {
@@ -49,13 +40,5 @@ exports.login = async (req, res) => {
 };
 
 exports.me = async (req, res) => {
-  try {
-    const user = await User.findByPk(req.user.id, {
-      attributes: { exclude: ['password'] },
-    });
-    if (!user) return res.status(404).json({ message: 'User not found' });
-    res.json(user);
-  } catch (err) {
-    res.status(500).json({ message: 'Error fetching user', error: err.message });
-  }
+  res.json({ id: req.user.id, email: req.user.email, role: req.user.role });
 };

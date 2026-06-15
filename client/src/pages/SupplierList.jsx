@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import api from '../api/axios';
+import { useAuth } from '../context/AuthContext';
 
 // ─── Constants ────────────────────────────────────────────────────
 const PAGE_SIZE = 10;
@@ -147,6 +148,8 @@ function Pagination({ total, page, pageSize, onChange }) {
 // ─── Main component ───────────────────────────────────────────────
 export default function SupplierList() {
   const navigate = useNavigate();
+  const { hasRole } = useAuth();
+  const canEdit = hasRole('admin', 'clerk');
   const [suppliers, setSuppliers]     = useState([]);
   const [loading, setLoading]         = useState(true);
   const [activeTab, setActiveTab]     = useState('');
@@ -212,7 +215,7 @@ export default function SupplierList() {
           <h1 className="page-title">Supplier Management</h1>
           {!loading && <div className="page-subtitle">{showingText}</div>}
         </div>
-        <Link to="/suppliers/new" className="btn btn-primary">+ Add Supplier</Link>
+        {canEdit && <Link to="/suppliers/new" className="btn btn-primary">+ Add Supplier</Link>}
       </div>
 
       {error && <div className="alert alert-error" style={{ marginBottom: 16 }}>{error}</div>}
@@ -258,7 +261,7 @@ export default function SupplierList() {
                         ? `No ${activeTab} suppliers found.`
                         : 'No suppliers yet.'}
                     </p>
-                    {!activeTab && (
+                    {!activeTab && canEdit && (
                       <Link to="/suppliers/new" className="btn btn-primary" style={{ marginTop: 12 }}>
                         + Add First Supplier
                       </Link>
@@ -315,18 +318,16 @@ export default function SupplierList() {
                   </td>
                   <td>
                     <div className="table-actions">
-                      <Link
-                        to={`/suppliers/${s.id}/edit`}
-                        className="btn btn-sm btn-outline"
-                      >
-                        Edit
-                      </Link>
-                      <button
-                        className="btn btn-sm btn-danger"
-                        onClick={() => setDeleteTarget(s)}
-                      >
-                        Delete
-                      </button>
+                      {canEdit && (
+                        <Link to={`/suppliers/${s.id}/edit`} className="btn btn-sm btn-outline">
+                          Edit
+                        </Link>
+                      )}
+                      {canEdit && (
+                        <button className="btn btn-sm btn-danger" onClick={() => setDeleteTarget(s)}>
+                          Delete
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

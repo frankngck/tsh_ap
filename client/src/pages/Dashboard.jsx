@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '../api/axios';
+import { useAuth } from '../context/AuthContext';
 
 const fmt = (n) =>
   `S$${Number(n || 0).toLocaleString('en-SG', { minimumFractionDigits: 2 })}`;
@@ -325,15 +326,23 @@ function AiInsightsPanel({ insights, loading, error, onRefresh }) {
 }
 
 // ─── Quick Actions ────────────────────────────────────────────────
-const ACTIONS = [
-  { label: '+ New Supplier',  path: '/suppliers/new', primary: true  },
-  { label: '+ Record Bill',   path: '/bills/new',     primary: true  },
-  { label: '+ Make Payment',  path: '/payments/new',  primary: true  },
-  { label: 'View Reports',    path: '/reports',       primary: false },
+const ACTIONS_CLERK_ADMIN = [
+  { label: '+ Create PO',     path: '/purchase-orders/new', primary: true  },
+  { label: '+ Record Bill',   path: '/bills/new',           primary: true  },
+  { label: '+ Make Payment',  path: '/payments/new',        primary: true  },
+  { label: '3-Way Match',     path: '/three-way-match',     primary: false },
+  { label: 'AI Reports',      path: '/ai-reports',          primary: false },
+];
+const ACTIONS_MANAGER = [
+  { label: '3-Way Match',  path: '/three-way-match', primary: true  },
+  { label: 'AI Reports',   path: '/ai-reports',      primary: true  },
+  { label: 'View Reports', path: '/reports',          primary: false },
 ];
 
 function QuickActions() {
   const navigate = useNavigate();
+  const { hasRole } = useAuth();
+  const actions = hasRole('manager') ? ACTIONS_MANAGER : ACTIONS_CLERK_ADMIN;
   return (
     <div className="card" style={{ height: '100%' }}>
       <div className="card-header">
@@ -341,7 +350,7 @@ function QuickActions() {
       </div>
       <div className="card-body">
         <div className="qa-grid">
-          {ACTIONS.map((a) => (
+          {actions.map((a) => (
             <button
               key={a.path}
               className={`qa-btn ${a.primary ? 'qa-btn--primary' : 'qa-btn--secondary'}`}
@@ -356,8 +365,62 @@ function QuickActions() {
   );
 }
 
+// ─── Pending Approvals (clerk only) ──────────────────────────────
+function PendingApprovalsPanel({ loading }) {
+  const [pendingClerk,   setPendingClerk]   = useState(null);
+  const [pendingManager, setPendingManager] = useState(null);
+
+  useEffect(() => {
+    api.get('/bills?status=RECEIVED&limit=1').then((r) => setPendingClerk(r.data.total ?? 0)).catch(() => setPendingClerk(0));
+    api.get('/bills?limit=200').then((r) => {
+      const pmCount = (r.data.data || []).filter((b) => b.approvalStage === 'PENDING_MANAGER').length;
+      setPendingManager(pmCount);
+    }).catch(() => setPendingManager(0));
+  }, []);
+
+  return (
+    <div style={{
+      background:   '#F0FDFA',
+      borderLeft:   '4px solid #0F766E',
+      borderRadius: 8,
+      padding:      '16px 20px',
+      marginBottom: 20,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+        <span style={{ color: '#0F766E', fontSize: 15 }}>📋</span>
+        <span style={{ fontWeight: 700, color: '#134E4A', fontSize: 15 }}>Pending Approvals</span>
+      </div>
+      <div style={{ display: 'flex', gap: 32 }}>
+        <div>
+          <div style={{ fontSize: 28, fontWeight: 700, color: '#0F766E' }}>
+            {loading || pendingClerk === null ? '—' : pendingClerk}
+          </div>
+          <div style={{ fontSize: 12, color: '#374151', marginTop: 2 }}>Bills awaiting your approval</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 28, fontWeight: 700, color: '#B45309' }}>
+            {loading || pendingManager === null ? '—' : pendingManager}
+          </div>
+          <div style={{ fontSize: 12, color: '#374151', marginTop: 2 }}>Submitted — awaiting manager</div>
+        </div>
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <Link to="/bills?status=RECEIVED" style={{ fontSize: 13, color: '#0F766E', textDecoration: 'underline' }}>
+          View bills to approve →
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 // ─── Dashboard ────────────────────────────────────────────────────
 export default function Dashboard() {
+  const { hasRole } = useAuth();
+  const [accessDenied,  setAccessDenied]  = useState(() => {
+    const flag = sessionStorage.getItem('accessDenied');
+    if (flag) { sessionStorage.removeItem('accessDenied'); return true; }
+    return false;
+  });
   const [summary,       setSummary]       = useState(null);
   const [outstanding,   setOutstanding]   = useState(null);
   const [cashflow,      setCashflow]      = useState(null);
@@ -406,6 +469,12 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {accessDenied && (
+        <div className="alert alert-error" style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>Access denied — you don't have permission to view that page.</span>
+          <button onClick={() => setAccessDenied(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 16, color: '#991B1B' }}>×</button>
+        </div>
+      )}
       {error && (
         <div className="alert alert-error" style={{ marginBottom: 16 }}>{error}</div>
       )}
@@ -434,8 +503,8 @@ export default function Dashboard() {
           loading={loadS}
         />
         <SummaryCard
-          label="Active Suppliers"
-          value={loadS ? '—' : (summary?.activeSupplierCount ?? 0)}
+          label="Suppliers"
+          value={loadS ? '—' : (summary?.supplierCount ?? 0)}
           sub="Registered suppliers"
           accent="blue"
           loading={loadS}
@@ -447,13 +516,17 @@ export default function Dashboard() {
         <AgeingSection data={outstanding} loading={loadO} />
       </div>
 
-      {/* ── AI INSIGHTS ── */}
-      <AiInsightsPanel
-        insights={insights}
-        loading={loadInsights}
-        error={insightsError}
-        onRefresh={fetchInsights}
-      />
+      {/* ── AI INSIGHTS (admin/manager) or PENDING APPROVALS (clerk) ── */}
+      {hasRole('admin', 'manager') ? (
+        <AiInsightsPanel
+          insights={insights}
+          loading={loadInsights}
+          error={insightsError}
+          onRefresh={fetchInsights}
+        />
+      ) : (
+        <PendingApprovalsPanel loading={loadS} />
+      )}
 
       {/* ── BOTTOM ROW: Table + Quick Actions ── */}
       <div className="dsh-bottom-row">

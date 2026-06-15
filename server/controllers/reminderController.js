@@ -1,7 +1,6 @@
 const { Bill, Supplier, PurchaseOrder, ReminderLog } = require('../models');
-const { Op, QueryTypes } = require('sequelize');
+const { Op } = require('sequelize');
 
-// ─── Helpers ──────────────────────────────────────────────────────
 function localDateStr() {
   const d = new Date();
   const pad = (n) => String(n).padStart(2, '0');
@@ -15,9 +14,7 @@ function addDaysStr(dateStr, n) {
 }
 
 function daysUntil(dueDateStr, todayStr) {
-  return Math.round(
-    (Date.parse(dueDateStr) - Date.parse(todayStr)) / 86_400_000
-  );
+  return Math.round((Date.parse(dueDateStr) - Date.parse(todayStr)) / 86_400_000);
 }
 
 function urgency(daysLeft) {
@@ -36,8 +33,8 @@ async function fetchUpcoming() {
       dueDate: { [Op.lte]: weekEnd },
     },
     include: [
-      { model: Supplier,       as: 'supplier',      attributes: ['id', 'companyName', 'supplierCode'] },
-      { model: PurchaseOrder,  as: 'purchaseOrder', attributes: ['id', 'poNumber'] },
+      { model: Supplier,      as: 'supplier',      attributes: ['id', 'companyName'] },
+      { model: PurchaseOrder, as: 'purchaseOrder', attributes: ['id', 'poNumber'] },
     ],
     order: [['dueDate', 'ASC']],
   });
@@ -45,22 +42,21 @@ async function fetchUpcoming() {
   return bills.map((b) => {
     const dl = daysUntil(String(b.dueDate).slice(0, 10), today);
     return {
-      id:           b.id,
-      billNumber:   b.billNumber,
-      dueDate:      String(b.dueDate).slice(0, 10),
-      total:        parseFloat(b.total),
-      amountPaid:   parseFloat(b.amountPaid),
-      amountDue:    Math.round((parseFloat(b.total) - parseFloat(b.amountPaid)) * 100) / 100,
-      status:       b.status,
-      daysLeft:     dl,
-      urgency:      urgency(dl),
-      supplier:     b.supplier,
-      poNumber:     b.purchaseOrder?.poNumber || null,
+      id:         b.id,
+      billNumber: b.billNumber,
+      dueDate:    String(b.dueDate).slice(0, 10),
+      total:      parseFloat(b.total),
+      amountPaid: parseFloat(b.amountPaid),
+      amountDue:  Math.round((parseFloat(b.total) - parseFloat(b.amountPaid)) * 100) / 100,
+      status:     b.status,
+      daysLeft:   dl,
+      urgency:    urgency(dl),
+      supplier:   b.supplier,
+      poNumber:   b.purchaseOrder?.poNumber || null,
     };
   });
 }
 
-// ─── GET /api/reminders/upcoming ─────────────────────────────────
 exports.upcoming = async (req, res) => {
   try {
     const bills = await fetchUpcoming();
@@ -70,60 +66,43 @@ exports.upcoming = async (req, res) => {
   }
 };
 
-// ─── GET /api/reminders/history ──────────────────────────────────
 exports.history = async (req, res) => {
   try {
-    const { sequelize } = require('../models');
-    const rows = await sequelize.query(
-      `SELECT
-         DATE(r.sentAt)                   AS date,
-         COUNT(*)                         AS billCount,
-         ROUND(SUM(b.total), 2)           AS totalAmount,
-         MAX(r.status)                    AS status
-       FROM reminder_logs r
-       JOIN bills b ON r.billId = b.id
-       GROUP BY DATE(r.sentAt)
-       ORDER BY date DESC
-       LIMIT 30`,
-      { type: QueryTypes.SELECT }
-    );
-    res.json(rows);
+    const logs = await ReminderLog.findAll({
+      order: [['sentAt', 'DESC']],
+      limit: 30,
+    });
+    res.json(logs);
   } catch (err) {
     res.status(500).json({ message: 'Error fetching reminder history', error: err.message });
   }
 };
 
-// ─── POST /api/reminders/send ────────────────────────────────────
 exports.send = async (req, res) => {
   try {
     const bills = await fetchUpcoming();
 
     if (bills.length === 0) {
-      return res.json({
-        message:     'No bills due this week — nothing to remind.',
-        billCount:   0,
-        totalAmount: 0,
-        bills:       [],
-      });
+      return res.json({ message: 'No bills due this week — nothing to remind.', billCount: 0, totalAmount: 0, bills: [] });
     }
 
-    const now = new Date();
-    const logs = bills.map((b) => ({
-      billId:       b.id,
-      reminderType: 'MANUAL_TRIGGER',
-      sentAt:       now,
-      recipient:    'AP Staff (Internal)',
-      message:      `Payment reminder: ${b.billNumber} from ${b.supplier?.companyName} due ${b.dueDate} (${b.daysLeft >= 0 ? b.daysLeft + ' days' : Math.abs(b.daysLeft) + ' days overdue'}) — S$${b.amountDue.toFixed(2)}. Urgency: ${b.urgency}.`,
-      status:       'SENT',
-    }));
-
-    await ReminderLog.bulkCreate(logs);
-
     const totalAmount = bills.reduce((s, b) => s + b.amountDue, 0);
+    const details = bills.map((b) =>
+      `${b.billNumber} (${b.supplier?.companyName}) due ${b.dueDate} — S$${b.amountDue.toFixed(2)} [${b.urgency}]`
+    ).join('\n');
+
+    await ReminderLog.create({
+      type:        'AP_PAYMENT',
+      sentAt:      new Date(),
+      recordCount: bills.length,
+      totalAmount: Math.round(totalAmount * 100) / 100,
+      status:      'SENT',
+      details,
+    });
 
     res.json({
       message:     `Reminder sent for ${bills.length} bill${bills.length !== 1 ? 's' : ''}.`,
-      sentAt:      now,
+      sentAt:      new Date(),
       billCount:   bills.length,
       totalAmount: Math.round(totalAmount * 100) / 100,
       bills:       bills.map((b) => ({

@@ -28,8 +28,8 @@ exports.getAll = async (req, res) => {
     const orders = await PurchaseOrder.findAll({
       where,
       include: [
-        { model: Supplier, as: 'supplier', attributes: ['id', 'companyName', 'supplierCode', 'email', 'contactPerson'] },
-        { model: PurchaseOrderItem, as: 'items', attributes: ['id', 'amount'] },
+        { model: Supplier,          as: 'supplier', attributes: ['id', 'companyName', 'email', 'contactPerson'] },
+        { model: PurchaseOrderItem, as: 'items',    attributes: ['id', 'amount'] },
       ],
       order: [['createdAt', 'DESC']],
     });
@@ -39,7 +39,6 @@ exports.getAll = async (req, res) => {
       plain.itemCount = plain.items.length;
       return plain;
     });
-
     res.json(result);
   } catch (err) {
     res.status(500).json({ message: 'Error fetching purchase orders', error: err.message });
@@ -50,9 +49,9 @@ exports.getById = async (req, res) => {
   try {
     const po = await PurchaseOrder.findByPk(req.params.id, {
       include: [
-        { model: Supplier, as: 'supplier' },
+        { model: Supplier,          as: 'supplier' },
         { model: PurchaseOrderItem, as: 'items' },
-        { model: DeliveryOrder, as: 'deliveryOrders', attributes: ['id', 'doNumber', 'deliveryDate', 'status'] },
+        { model: DeliveryOrder,     as: 'deliveryOrders', attributes: ['id', 'doNumber', 'receivedDate', 'status'] },
       ],
     });
     if (!po) return res.status(404).json({ message: 'Purchase order not found' });
@@ -69,35 +68,31 @@ exports.create = async (req, res) => {
     const GST_RATE = parseFloat(process.env.GST_RATE || 0.09);
 
     poData.poNumber = await generatePoNumber();
-    poData.status = 'DRAFT';
-    if (!poData.orderDate) {
+    poData.status   = 'DRAFT';
+    if (!poData.poDate) {
       const d = new Date();
-      poData.orderDate = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      poData.poDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     }
+    if (!poData.expectedDate) poData.expectedDate = poData.poDate;
 
     let subtotal = 0;
     for (const item of items) {
       item.amount = parseFloat(item.quantity) * parseFloat(item.unitPrice);
       subtotal += item.amount;
     }
-    poData.subtotal = subtotal.toFixed(2);
+    poData.subtotal  = subtotal.toFixed(2);
     poData.gstAmount = (subtotal * GST_RATE).toFixed(2);
-    poData.total = (subtotal + subtotal * GST_RATE).toFixed(2);
+    poData.total     = (subtotal + subtotal * GST_RATE).toFixed(2);
 
     const po = await PurchaseOrder.create(poData, { transaction: t });
-
     if (items.length > 0) {
-      await PurchaseOrderItem.bulkCreate(
-        items.map((item) => ({ ...item, purchaseOrderId: po.id })),
-        { transaction: t }
-      );
+      await PurchaseOrderItem.bulkCreate(items.map((i) => ({ ...i, purchaseOrderId: po.id })), { transaction: t });
     }
-
     await t.commit();
 
     const created = await PurchaseOrder.findByPk(po.id, {
       include: [
-        { model: Supplier, as: 'supplier', attributes: ['id', 'companyName'] },
+        { model: Supplier,          as: 'supplier', attributes: ['id', 'companyName'] },
         { model: PurchaseOrderItem, as: 'items' },
       ],
     });
@@ -112,12 +107,8 @@ exports.update = async (req, res) => {
   const t = await PurchaseOrder.sequelize.transaction();
   try {
     const po = await PurchaseOrder.findByPk(req.params.id, { transaction: t });
-    if (!po) {
-      await t.rollback();
-      return res.status(404).json({ message: 'Purchase order not found' });
-    }
-
-    if (['CANCELLED', 'CLOSED'].includes(po.status)) {
+    if (!po) { await t.rollback(); return res.status(404).json({ message: 'Purchase order not found' }); }
+    if (['CANCELLED', 'COMPLETED'].includes(po.status)) {
       await t.rollback();
       return res.status(400).json({ message: `Cannot edit a ${po.status} purchase order` });
     }
@@ -133,15 +124,12 @@ exports.update = async (req, res) => {
         item.amount = parseFloat(item.quantity) * parseFloat(item.unitPrice);
         subtotal += item.amount;
       }
-      poData.subtotal = subtotal.toFixed(2);
+      poData.subtotal  = subtotal.toFixed(2);
       poData.gstAmount = (subtotal * GST_RATE).toFixed(2);
-      poData.total = (subtotal + subtotal * GST_RATE).toFixed(2);
+      poData.total     = (subtotal + subtotal * GST_RATE).toFixed(2);
 
       await PurchaseOrderItem.destroy({ where: { purchaseOrderId: po.id }, transaction: t });
-      await PurchaseOrderItem.bulkCreate(
-        items.map((i) => ({ ...i, purchaseOrderId: po.id })),
-        { transaction: t }
-      );
+      await PurchaseOrderItem.bulkCreate(items.map((i) => ({ ...i, purchaseOrderId: po.id })), { transaction: t });
     }
 
     await po.update(poData, { transaction: t });
@@ -149,7 +137,7 @@ exports.update = async (req, res) => {
 
     const updated = await PurchaseOrder.findByPk(po.id, {
       include: [
-        { model: Supplier, as: 'supplier', attributes: ['id', 'companyName'] },
+        { model: Supplier,          as: 'supplier', attributes: ['id', 'companyName'] },
         { model: PurchaseOrderItem, as: 'items' },
       ],
     });
@@ -164,10 +152,8 @@ exports.send = async (req, res) => {
   try {
     const po = await PurchaseOrder.findByPk(req.params.id);
     if (!po) return res.status(404).json({ message: 'Purchase order not found' });
-    if (po.status !== 'DRAFT') {
-      return res.status(400).json({ message: `Cannot send a PO with status ${po.status}` });
-    }
-    await po.update({ status: 'SENT' });
+    if (po.status !== 'DRAFT') return res.status(400).json({ message: `Cannot send a PO with status ${po.status}` });
+    await po.update({ status: 'SENT', sentDate: new Date() });
     res.json({ message: 'Purchase order sent', purchaseOrder: po });
   } catch (err) {
     res.status(500).json({ message: 'Error sending purchase order', error: err.message });
@@ -178,11 +164,8 @@ exports.confirm = async (req, res) => {
   try {
     const po = await PurchaseOrder.findByPk(req.params.id);
     if (!po) return res.status(404).json({ message: 'Purchase order not found' });
-    if (po.status !== 'SENT') {
-      return res.status(400).json({ message: `Cannot confirm a PO with status ${po.status}` });
-    }
-    // Model ENUM has no CONFIRMED; RECEIVED represents supplier-acknowledged state
-    await po.update({ status: 'RECEIVED' });
+    if (po.status !== 'SENT') return res.status(400).json({ message: `Cannot confirm a PO with status ${po.status}` });
+    await po.update({ status: 'CONFIRMED', confirmedDate: new Date() });
     res.json({ message: 'Purchase order confirmed', purchaseOrder: po });
   } catch (err) {
     res.status(500).json({ message: 'Error confirming purchase order', error: err.message });
@@ -193,7 +176,7 @@ exports.cancel = async (req, res) => {
   try {
     const po = await PurchaseOrder.findByPk(req.params.id);
     if (!po) return res.status(404).json({ message: 'Purchase order not found' });
-    if (['CLOSED', 'CANCELLED'].includes(po.status)) {
+    if (['COMPLETED', 'CANCELLED'].includes(po.status)) {
       return res.status(400).json({ message: `Cannot cancel a ${po.status} purchase order` });
     }
     await po.update({ status: 'CANCELLED' });

@@ -17,10 +17,10 @@ exports.getAll = async (req, res) => {
   try {
     const orders = await DeliveryOrder.findAll({
       include: [
-        { model: Supplier, as: 'supplier', attributes: ['id', 'companyName', 'supplierCode'] },
+        { model: Supplier,      as: 'supplier',      attributes: ['id', 'companyName'] },
         { model: PurchaseOrder, as: 'purchaseOrder', attributes: ['id', 'poNumber'] },
       ],
-      order: [['deliveryDate', 'DESC']],
+      order: [['receivedDate', 'DESC']],
     });
     res.json(orders);
   } catch (err) {
@@ -58,9 +58,9 @@ exports.create = async (req, res) => {
     const { purchaseOrderId, items = [], ...doData } = req.body;
 
     doData.doNumber = await generateDoNumber();
-    if (!doData.deliveryDate) {
+    if (!doData.receivedDate) {
       const d = new Date();
-      doData.deliveryDate = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      doData.receivedDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     }
 
     let po = null;
@@ -69,62 +69,31 @@ exports.create = async (req, res) => {
         include: [{ model: PurchaseOrderItem, as: 'items' }],
         transaction: t,
       });
-      if (!po) {
-        await t.rollback();
-        return res.status(404).json({ message: 'Purchase order not found' });
-      }
+      if (!po) { await t.rollback(); return res.status(404).json({ message: 'Purchase order not found' }); }
       doData.purchaseOrderId = purchaseOrderId;
       if (!doData.supplierId) doData.supplierId = po.supplierId;
     }
 
-    // Compare received vs ordered quantities to determine DO and PO status
-    let allFullyReceived = true;
-    if (po && items.length > 0) {
-      for (const item of items) {
-        const poItem = po.items.find((i) => i.id === item.purchaseOrderItemId);
-        if (poItem) {
-          const received = parseFloat(item.quantity);
-          const ordered = parseFloat(poItem.quantity);
-          const alreadyReceived = parseFloat(poItem.quantityReceived || 0);
-          if (received + alreadyReceived < ordered) {
-            allFullyReceived = false;
-            break;
-          }
-        }
-      }
-    }
-
-    doData.status = allFullyReceived ? 'RECEIVED' : 'PARTIAL';
+    doData.status = doData.status || 'RECEIVED';
 
     const doRecord = await DeliveryOrder.create(doData, { transaction: t });
 
     if (items.length > 0) {
       await DeliveryOrderItem.bulkCreate(
-        items.map((i) => ({ ...i, deliveryOrderId: doRecord.id })),
+        items.map((i) => ({
+          deliveryOrderId:  doRecord.id,
+          poItemId:         i.poItemId || null,
+          description:      i.description,
+          quantityReceived: i.quantityReceived || i.quantity || 0,
+          remarks:          i.remarks || null,
+        })),
         { transaction: t }
       );
-
-      // Accumulate quantityReceived on PO items
-      if (po) {
-        for (const item of items) {
-          if (item.purchaseOrderItemId) {
-            const poItem = po.items.find((i) => i.id === item.purchaseOrderItemId);
-            if (poItem) {
-              const newQty = parseFloat(poItem.quantityReceived || 0) + parseFloat(item.quantity);
-              await PurchaseOrderItem.update(
-                { quantityReceived: newQty.toFixed(2) },
-                { where: { id: poItem.id }, transaction: t }
-              );
-            }
-          }
-        }
-      }
     }
 
-    // Update PO status: CLOSED if all received, PARTIAL if some short
     if (po) {
       await PurchaseOrder.update(
-        { status: allFullyReceived ? 'CLOSED' : 'PARTIAL' },
+        { status: 'PART_RECEIVED' },
         { where: { id: po.id }, transaction: t }
       );
     }
@@ -133,8 +102,8 @@ exports.create = async (req, res) => {
 
     const created = await DeliveryOrder.findByPk(doRecord.id, {
       include: [
-        { model: Supplier, as: 'supplier', attributes: ['id', 'companyName'] },
-        { model: PurchaseOrder, as: 'purchaseOrder', attributes: ['id', 'poNumber', 'status'] },
+        { model: Supplier,          as: 'supplier',      attributes: ['id', 'companyName'] },
+        { model: PurchaseOrder,     as: 'purchaseOrder', attributes: ['id', 'poNumber', 'status'] },
         { model: DeliveryOrderItem, as: 'items' },
       ],
     });

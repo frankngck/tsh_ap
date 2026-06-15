@@ -13,13 +13,11 @@ module.exports = (sequelize, DataTypes) => {
 
   User.init(
     {
-      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-      username: { type: DataTypes.STRING(100), allowNull: false, unique: true },
+      id:       { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      email:    { type: DataTypes.STRING(255), allowNull: false, unique: true },
       password: { type: DataTypes.STRING(255), allowNull: false },
-      email: { type: DataTypes.STRING(150), allowNull: false, unique: true },
-      fullName: { type: DataTypes.STRING(150) },
-      role: { type: DataTypes.ENUM('ADMIN', 'MANAGER', 'STAFF'), defaultValue: 'STAFF' },
-      status: { type: DataTypes.ENUM('ACTIVE', 'INACTIVE'), defaultValue: 'ACTIVE' },
+      name:     { type: DataTypes.STRING(100), allowNull: false, defaultValue: 'User' },
+      role:     { type: DataTypes.ENUM('admin', 'clerk', 'manager'), allowNull: false, defaultValue: 'clerk' },
     },
     {
       sequelize,
@@ -27,18 +25,6 @@ module.exports = (sequelize, DataTypes) => {
       tableName: 'users',
       timestamps: true,
       underscored: false,
-      hooks: {
-        beforeCreate: async (user) => {
-          if (user.password) {
-            user.password = await bcrypt.hash(user.password, 10);
-          }
-        },
-        beforeUpdate: async (user) => {
-          if (user.changed('password')) {
-            user.password = await bcrypt.hash(user.password, 10);
-          }
-        },
-      },
     }
   );
 

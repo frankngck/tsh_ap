@@ -4,13 +4,10 @@ const { Op } = require('sequelize');
 exports.create = async (req, res) => {
   const t = await Bill.sequelize.transaction();
   try {
-    const { billId, paymentDate, amount, paymentMethod, reference, notes } = req.body;
+    const { billId, paymentDate, amount, method, referenceNumber, notes } = req.body;
 
     const bill = await Bill.findByPk(billId, { transaction: t });
-    if (!bill) {
-      await t.rollback();
-      return res.status(404).json({ message: 'Bill not found' });
-    }
+    if (!bill) { await t.rollback(); return res.status(404).json({ message: 'Bill not found' }); }
 
     if (bill.status !== 'APPROVED') {
       await t.rollback();
@@ -20,10 +17,7 @@ exports.create = async (req, res) => {
     }
 
     const payAmount = parseFloat(amount);
-    if (payAmount <= 0) {
-      await t.rollback();
-      return res.status(400).json({ message: 'Payment amount must be greater than zero' });
-    }
+    if (payAmount <= 0) { await t.rollback(); return res.status(400).json({ message: 'Payment amount must be greater than zero' }); }
 
     const outstanding = parseFloat(bill.total) - parseFloat(bill.amountPaid);
     if (payAmount > outstanding + 0.001) {
@@ -34,38 +28,18 @@ exports.create = async (req, res) => {
     }
 
     const payment = await Payment.create(
-      {
-        billId,
-        paymentDate,
-        amount: payAmount,
-        paymentMethod: paymentMethod || 'BANK_TRANSFER',
-        reference,
-        notes,
-        recordedBy: req.user ? req.user.id : null,
-      },
+      { billId, paymentDate, amount: payAmount, method: method || 'BANK_TRANSFER', referenceNumber: referenceNumber || null, notes: notes || null },
       { transaction: t }
     );
 
     const newAmountPaid = parseFloat(bill.amountPaid) + payAmount;
-    const newStatus =
-      newAmountPaid >= parseFloat(bill.total) - 0.001 ? 'PAID' : 'APPROVED';
-
-    await bill.update(
-      { amountPaid: newAmountPaid.toFixed(2), status: newStatus },
-      { transaction: t }
-    );
-
+    const newStatus = newAmountPaid >= parseFloat(bill.total) - 0.001 ? 'PAID' : 'APPROVED';
+    await bill.update({ amountPaid: newAmountPaid.toFixed(2), status: newStatus }, { transaction: t });
     await t.commit();
 
     res.status(201).json({
       payment,
-      bill: {
-        id: bill.id,
-        billNumber: bill.billNumber,
-        total: bill.total,
-        amountPaid: newAmountPaid.toFixed(2),
-        status: newStatus,
-      },
+      bill: { id: bill.id, billNumber: bill.billNumber, total: bill.total, amountPaid: newAmountPaid.toFixed(2), status: newStatus },
     });
   } catch (err) {
     await t.rollback();
@@ -80,11 +54,7 @@ exports.getByBill = async (req, res) => {
     });
     if (!bill) return res.status(404).json({ message: 'Bill not found' });
 
-    const payments = await Payment.findAll({
-      where: { billId: req.params.billId },
-      order: [['paymentDate', 'DESC']],
-    });
-
+    const payments = await Payment.findAll({ where: { billId: req.params.billId }, order: [['paymentDate', 'DESC']] });
     res.json({ bill, payments });
   } catch (err) {
     res.status(500).json({ message: 'Error fetching payments', error: err.message });
@@ -93,16 +63,12 @@ exports.getByBill = async (req, res) => {
 
 exports.getAll = async (req, res) => {
   try {
-    const { startDate, endDate, paymentMethod } = req.query;
+    const { startDate, endDate, method } = req.query;
     const where = {};
 
-    if (startDate && endDate) {
-      where.paymentDate = { [Op.between]: [startDate, endDate] };
-    } else if (startDate) {
-      where.paymentDate = { [Op.gte]: startDate };
-    }
-
-    if (paymentMethod) where.paymentMethod = paymentMethod;
+    if (startDate && endDate) where.paymentDate = { [Op.between]: [startDate, endDate] };
+    else if (startDate) where.paymentDate = { [Op.gte]: startDate };
+    if (method) where.method = method;
 
     const payments = await Payment.findAll({
       where,
@@ -116,7 +82,6 @@ exports.getAll = async (req, res) => {
       ],
       order: [['paymentDate', 'DESC']],
     });
-
     res.json(payments);
   } catch (err) {
     res.status(500).json({ message: 'Error fetching payments', error: err.message });

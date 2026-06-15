@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const aiController = require('../controllers/aiController');
-const auth = require('../middleware/auth');
+const { verifyToken } = require('../middleware/auth');
 
-router.post('/query',              auth, aiController.query);
-router.get('/dashboard-insights',  auth, aiController.dashboardInsights);
-router.post('/match-analyse',      auth, aiController.matchAnalyse);
+router.post('/query',              verifyToken, aiController.query);
+router.get('/dashboard-insights',  verifyToken, aiController.dashboardInsights);
+router.post('/match-analyse',      verifyToken, aiController.matchAnalyse);
 
 module.exports = router;

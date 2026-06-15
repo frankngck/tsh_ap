@@ -4,18 +4,19 @@ const { Model } = require('sequelize');
 module.exports = (sequelize, DataTypes) => {
   class DeliveryOrderItem extends Model {
     static associate(models) {
-      DeliveryOrderItem.belongsTo(models.DeliveryOrder, { foreignKey: 'deliveryOrderId', as: 'deliveryOrder' });
-      DeliveryOrderItem.belongsTo(models.PurchaseOrderItem, { foreignKey: 'purchaseOrderItemId', as: 'purchaseOrderItem' });
+      DeliveryOrderItem.belongsTo(models.DeliveryOrder,    { foreignKey: 'deliveryOrderId', as: 'deliveryOrder' });
+      DeliveryOrderItem.belongsTo(models.PurchaseOrderItem, { foreignKey: 'poItemId',        as: 'purchaseOrderItem' });
     }
   }
 
   DeliveryOrderItem.init(
     {
-      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-      deliveryOrderId: { type: DataTypes.INTEGER, allowNull: false },
-      purchaseOrderItemId: { type: DataTypes.INTEGER },
-      description: { type: DataTypes.STRING(500) },
-      quantity: { type: DataTypes.DECIMAL(12, 2), allowNull: false },
+      id:               { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      deliveryOrderId:  { type: DataTypes.INTEGER, allowNull: false },
+      poItemId:         { type: DataTypes.INTEGER },
+      description:      { type: DataTypes.STRING(500) },
+      quantityReceived: { type: DataTypes.INTEGER, allowNull: false },
+      remarks:          { type: DataTypes.TEXT },
     },
     {
       sequelize,

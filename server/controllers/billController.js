@@ -13,23 +13,21 @@ exports.getAll = async (req, res) => {
   try {
     const { status, supplierId, page = 1, limit = 50 } = req.query;
     const where = {};
-
     if (status) where.status = status;
     if (supplierId) where.supplierId = supplierId;
 
     const bills = await Bill.findAll({
       where,
       include: [
-        { model: Supplier, as: 'supplier', attributes: ['id', 'companyName', 'supplierCode'] },
-        { model: PurchaseOrder, as: 'purchaseOrder', attributes: ['id', 'poNumber'] },
+        { model: Supplier,       as: 'supplier',      attributes: ['id', 'companyName'] },
+        { model: PurchaseOrder,  as: 'purchaseOrder', attributes: ['id', 'poNumber'] },
       ],
       order: [['billDate', 'DESC']],
-      limit: parseInt(limit),
+      limit:  parseInt(limit),
       offset: (parseInt(page) - 1) * parseInt(limit),
     });
 
     const total = await Bill.count({ where });
-
     res.json({ data: bills, total, page: parseInt(page), limit: parseInt(limit) });
   } catch (err) {
     res.status(500).json({ message: 'Error fetching bills', error: err.message });
@@ -40,10 +38,10 @@ exports.getById = async (req, res) => {
   try {
     const bill = await Bill.findByPk(req.params.id, {
       include: [
-        { model: Supplier, as: 'supplier' },
-        { model: BillItem, as: 'items' },
-        { model: PurchaseOrder, as: 'purchaseOrder', attributes: ['id', 'poNumber'] },
-        { model: DeliveryOrder, as: 'deliveryOrder', attributes: ['id', 'doNumber'] },
+        { model: Supplier,       as: 'supplier' },
+        { model: BillItem,       as: 'items' },
+        { model: PurchaseOrder,  as: 'purchaseOrder', attributes: ['id', 'poNumber'] },
+        { model: DeliveryOrder,  as: 'deliveryOrder', attributes: ['id', 'doNumber'] },
       ],
     });
     if (!bill) return res.status(404).json({ message: 'Bill not found' });
@@ -67,17 +65,16 @@ exports.create = async (req, res) => {
       subtotal += item.amount;
     }
 
-    billData.subtotal = subtotal.toFixed(2);
-    billData.gstAmount = (subtotal * GST_RATE).toFixed(2);
-    billData.total = (subtotal + subtotal * GST_RATE).toFixed(2);
+    billData.subtotal   = subtotal.toFixed(2);
+    billData.gstAmount  = (subtotal * GST_RATE).toFixed(2);
+    billData.total      = (subtotal + subtotal * GST_RATE).toFixed(2);
     billData.amountPaid = 0;
-    billData.status = 'RECEIVED';
+    billData.status     = 'RECEIVED';
 
     const bill = await Bill.create(billData, { transaction: t });
 
     if (items.length > 0) {
-      const billItems = items.map((item) => ({ ...item, billId: bill.id }));
-      await BillItem.bulkCreate(billItems, { transaction: t });
+      await BillItem.bulkCreate(items.map((i) => ({ ...i, billId: bill.id })), { transaction: t });
     }
 
     await t.commit();
@@ -88,7 +85,6 @@ exports.create = async (req, res) => {
         { model: BillItem, as: 'items' },
       ],
     });
-
     res.status(201).json(created);
   } catch (err) {
     await t.rollback();
@@ -100,15 +96,8 @@ exports.update = async (req, res) => {
   const t = await Bill.sequelize.transaction();
   try {
     const bill = await Bill.findByPk(req.params.id, { transaction: t });
-    if (!bill) {
-      await t.rollback();
-      return res.status(404).json({ message: 'Bill not found' });
-    }
-
-    if (['PAID'].includes(bill.status)) {
-      await t.rollback();
-      return res.status(400).json({ message: 'Cannot edit a PAID bill' });
-    }
+    if (!bill) { await t.rollback(); return res.status(404).json({ message: 'Bill not found' }); }
+    if (bill.status === 'PAID') { await t.rollback(); return res.status(400).json({ message: 'Cannot edit a PAID bill' }); }
 
     const { items, ...billData } = req.body;
     delete billData.billNumber;
@@ -122,15 +111,12 @@ exports.update = async (req, res) => {
         item.amount = parseFloat(item.quantity) * parseFloat(item.unitPrice);
         subtotal += item.amount;
       }
-      billData.subtotal = subtotal.toFixed(2);
+      billData.subtotal  = subtotal.toFixed(2);
       billData.gstAmount = (subtotal * GST_RATE).toFixed(2);
-      billData.total = (subtotal + subtotal * GST_RATE).toFixed(2);
+      billData.total     = (subtotal + subtotal * GST_RATE).toFixed(2);
 
       await BillItem.destroy({ where: { billId: bill.id }, transaction: t });
-      await BillItem.bulkCreate(
-        items.map((i) => ({ ...i, billId: bill.id })),
-        { transaction: t }
-      );
+      await BillItem.bulkCreate(items.map((i) => ({ ...i, billId: bill.id })), { transaction: t });
     }
 
     await bill.update(billData, { transaction: t });
@@ -153,17 +139,14 @@ exports.approve = async (req, res) => {
   try {
     const bill = await Bill.findByPk(req.params.id);
     if (!bill) return res.status(404).json({ message: 'Bill not found' });
-
     if (bill.status !== 'RECEIVED') {
       return res.status(400).json({ message: `Cannot approve a bill with status ${bill.status}` });
     }
-
     await bill.update({
-      status: 'APPROVED',
-      approvedBy: req.user.id,
-      approvedAt: new Date(),
+      status:            'APPROVED',
+      approvedByClerkId: req.user.id,
+      approvedAt:        new Date(),
     });
-
     res.json({ message: 'Bill approved', bill });
   } catch (err) {
     res.status(500).json({ message: 'Error approving bill', error: err.message });
@@ -174,16 +157,13 @@ exports.dispute = async (req, res) => {
   try {
     const bill = await Bill.findByPk(req.params.id);
     if (!bill) return res.status(404).json({ message: 'Bill not found' });
-
     if (!['RECEIVED', 'APPROVED'].includes(bill.status)) {
       return res.status(400).json({ message: `Cannot dispute a bill with status ${bill.status}` });
     }
-
     await bill.update({
       status: 'DISPUTED',
-      disputeReason: req.body.reason || null,
+      notes:  req.body.reason || bill.notes || null,
     });
-
     res.json({ message: 'Bill marked as disputed', bill });
   } catch (err) {
     res.status(500).json({ message: 'Error disputing bill', error: err.message });
@@ -199,15 +179,12 @@ exports.getThreeWayMatchList = async (req, res) => {
         'billDate', 'dueDate', 'total', 'status', 'matchStatus',
       ],
       include: [
-        { model: Supplier,       as: 'supplier',       attributes: ['companyName'] },
-        { model: PurchaseOrder,  as: 'purchaseOrder',  attributes: ['poNumber', 'status'] },
-        { model: DeliveryOrder,  as: 'deliveryOrder',  attributes: ['doNumber', 'status'] },
-        { model: BillItem,       as: 'items' },
+        { model: Supplier,      as: 'supplier',      attributes: ['companyName'] },
+        { model: PurchaseOrder, as: 'purchaseOrder', attributes: ['poNumber', 'status'] },
+        { model: DeliveryOrder, as: 'deliveryOrder', attributes: ['doNumber', 'status'] },
+        { model: BillItem,      as: 'items' },
       ],
-      order: [
-        ['matchStatus', 'DESC'],
-        ['billDate',    'DESC'],
-      ],
+      order: [['matchStatus', 'DESC'], ['billDate', 'DESC']],
     });
     res.json(bills);
   } catch (err) {
@@ -241,24 +218,21 @@ exports.matchAnalyse = async (req, res) => {
     const descMatch = (a, b) =>
       (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
 
-    // Find DO item: FK match first, then description fallback for NULL-FK rows
-    const findDoItem = (poItem) =>
-      doItems.find((d) => d.purchaseOrderItemId === poItem.id) ||
-      doItems.find((d) => d.purchaseOrderItemId == null && descMatch(d.description, poItem.description)) ||
+    const findDoItem   = (poItem) =>
+      doItems.find((d) => d.poItemId === poItem.id) ||
+      doItems.find((d) => d.poItemId == null && descMatch(d.description, poItem.description)) ||
       null;
 
-    // Find bill item: always by description (bill_items has no poItemId FK)
     const findBillItem = (poItem) =>
       billItems.find((b) => descMatch(b.description, poItem.description)) || null;
 
-    // PO-item-driven LEFT JOIN — one row per PO line, never drops DO rows
     const results = poItems.map((poItem) => {
       const doItem   = findDoItem(poItem);
       const billItem = findBillItem(poItem);
 
       const poQty     = parseFloat(poItem.quantity  || 0);
       const poPrice   = parseFloat(poItem.unitPrice  || 0);
-      const doQty     = doItem   ? parseFloat(doItem.quantity   || 0) : null;
+      const doQty     = doItem   ? parseFloat(doItem.quantityReceived || 0) : null;
       const billQty   = billItem ? parseFloat(billItem.quantity  || 0) : null;
       const billPrice = billItem ? parseFloat(billItem.unitPrice || 0) : null;
 
@@ -276,22 +250,11 @@ exports.matchAnalyse = async (req, res) => {
 
       const pending = doItem === null && billItem === null;
       const matched = !pending && issues.length === 0;
-
-      const impact = billPrice !== null && Math.abs(billPrice - poPrice) > 0.005
+      const impact  = billPrice !== null && Math.abs(billPrice - poPrice) > 0.005
         ? ((billPrice - poPrice) * (billQty ?? poQty)).toFixed(2)
         : null;
 
-      return {
-        item:      poItem.description,
-        poQty,
-        poPrice,
-        billQty,
-        billPrice,
-        doQty,
-        match:     pending ? null : matched,
-        issue:     issues[0] || null,
-        impact,
-      };
+      return { item: poItem.description, poQty, poPrice, billQty, billPrice, doQty, match: pending ? null : matched, issue: issues[0] || null, impact };
     });
 
     const hasDiscrepancy = results.some((r) => r.match === false);
@@ -300,14 +263,7 @@ exports.matchAnalyse = async (req, res) => {
 
     await bill.update({ matchStatus });
 
-    res.json({
-      billId:      bill.id,
-      billNumber:  bill.billNumber,
-      matchStatus,
-      hasPO:       !!bill.purchaseOrder,
-      hasDO:       !!bill.deliveryOrder,
-      results,
-    });
+    res.json({ billId: bill.id, billNumber: bill.billNumber, matchStatus, hasPO: !!bill.purchaseOrder, hasDO: !!bill.deliveryOrder, results });
   } catch (err) {
     res.status(500).json({ message: 'Error analysing match', error: err.message });
   }
@@ -317,11 +273,7 @@ exports.remove = async (req, res) => {
   try {
     const bill = await Bill.findByPk(req.params.id);
     if (!bill) return res.status(404).json({ message: 'Bill not found' });
-
-    if (bill.status === 'PAID') {
-      return res.status(400).json({ message: 'Cannot delete a PAID bill' });
-    }
-
+    if (bill.status === 'PAID') return res.status(400).json({ message: 'Cannot delete a PAID bill' });
     await bill.destroy();
     res.json({ message: 'Bill deleted successfully' });
   } catch (err) {

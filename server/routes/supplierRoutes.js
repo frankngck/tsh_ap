@@ -1,12 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const supplierController = require('../controllers/supplierController');
-const auth = require('../middleware/auth');
+const { verifyToken } = require('../middleware/auth');
 
-router.get('/', auth, supplierController.getAll);
-router.get('/:id', auth, supplierController.getById);
-router.post('/', auth, supplierController.create);
-router.put('/:id', auth, supplierController.update);
-router.delete('/:id', auth, supplierController.remove);
+router.get('/', verifyToken, supplierController.getAll);
+router.get('/:id', verifyToken, supplierController.getById);
+router.post('/', verifyToken, supplierController.create);
+router.put('/:id', verifyToken, supplierController.update);
+router.delete('/:id', verifyToken, supplierController.remove);
 
 module.exports = router;
